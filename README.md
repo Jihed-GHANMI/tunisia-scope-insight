@@ -19,7 +19,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 SUPABASE_URL
 SUPABASE_PUBLISHABLE_KEY
 BACKOFFICE_PASSCODE
-OPENAI_API_KEY
+OPENAI_API_KEY_ENCRYPTION_SECRET
 ```
 
 3. Lancer l'application:
@@ -48,15 +48,19 @@ automatiquement avec ce passcode.
 
 ## Infra OpenAI
 
-La generation IA du rapport utilise l'API OpenAI Responses.
-Configurer la variable serveur suivante dans l'environnement de deploiement:
+La generation IA du rapport utilise l'API OpenAI Responses. La cle API se renseigne
+dans le backoffice et est stockee chiffree cote serveur/Supabase. Elle n'est jamais
+renvoyee au navigateur.
+
+Configurer aussi un secret serveur stable pour le chiffrement:
 
 ```bash
-OPENAI_API_KEY=...
+OPENAI_API_KEY_ENCRYPTION_SECRET=...
 ```
 
-Sans cette cle, l'application continue de fonctionner, mais la section IA affiche
-un message de configuration manquante.
+Sans ce secret, l'application utilise `BACKOFFICE_PASSCODE` comme cle de chiffrement.
+`OPENAI_API_KEY` reste accepte comme fallback serveur optionnel si aucune cle n'est
+encore sauvegardee dans le backoffice.
 
 ## Deploiement Netlify
 
@@ -75,7 +79,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 SUPABASE_URL
 SUPABASE_PUBLISHABLE_KEY
 BACKOFFICE_PASSCODE
-OPENAI_API_KEY
+OPENAI_API_KEY_ENCRYPTION_SECRET
 ```
 
 ## Verification avant livraison

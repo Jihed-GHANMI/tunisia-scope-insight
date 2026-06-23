@@ -86,8 +86,8 @@ function loadMigrationSql(filePath) {
   let sql = fs.readFileSync(filePath, "utf8");
   const passcodeHash = getBackofficePasscodeHash();
 
-  if (passcodeHash && filePath.includes("create_ai_report_settings")) {
-    sql = sql.replace(/<> '[a-f0-9]{64}'/, `<> '${passcodeHash}'`);
+  if (passcodeHash) {
+    sql = sql.replace(/<> '[a-f0-9]{64}'/g, `<> '${passcodeHash}'`);
   }
 
   return sql;
@@ -113,11 +113,17 @@ async function assertSupabaseInfra(client) {
      from pg_proc p
      join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public'
-       and p.proname = 'update_ai_report_settings'`,
+       and p.proname = any($1::text[])`,
+    [["update_ai_report_settings", "get_ai_report_settings"]],
   );
 
-  if (functionResult.rowCount !== 1) {
-    throw new Error("Missing Supabase RPC function: update_ai_report_settings.");
+  const existingFunctions = new Set(functionResult.rows.map((row) => row.proname));
+  const missingFunctions = ["update_ai_report_settings", "get_ai_report_settings"].filter(
+    (functionName) => !existingFunctions.has(functionName),
+  );
+
+  if (missingFunctions.length > 0) {
+    throw new Error(`Missing Supabase RPC function: ${missingFunctions.join(", ")}.`);
   }
 }
 

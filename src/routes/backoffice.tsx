@@ -2,13 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
   Cpu,
-  Database,
   FileText,
   Lock,
   Save,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
@@ -18,12 +16,6 @@ import {
   type AiReportConfig,
 } from "@/lib/ai-report-config";
 import { getAiReportConfig, saveAiReportConfig } from "@/lib/ai-report-actions";
-import { SECTORS } from "@/lib/maturity-data";
-import { saveScoringSubmissions } from "@/lib/scoring-submissions";
-import {
-  generateSyntheticScoringData,
-  type SyntheticScoringRecord,
-} from "@/lib/synthetic-data-actions";
 
 export const Route = createFileRoute("/backoffice")({
   head: () => ({
@@ -36,32 +28,16 @@ export const Route = createFileRoute("/backoffice")({
 });
 
 type SaveState = "idle" | "saving" | "saved" | "error";
-type SyntheticState = "idle" | "generating" | "ready" | "inserting" | "inserted" | "error";
-
-const DEFAULT_SYNTHETIC_FORM = {
-  apiKey: "",
-  baseUrl: DEFAULT_AI_REPORT_CONFIG.baseUrl,
-  model: DEFAULT_AI_REPORT_CONFIG.model,
-  rowCount: 12,
-  sectors: ["services", "industrie", "commerce"],
-  maturityScenario: "mixed" as "mixed" | "early" | "growth" | "advanced" | "regulated-risk",
-  noiseLevel: 0.35,
-  countryContext: "Tunisie",
-  researchContext:
-    "PFE en data science: segmentation des niveaux de maturite digitale, gouvernance data, qualite des donnees et readiness IA.",
-};
 
 function Backoffice() {
   const [passcode, setPasscode] = useState("");
   const [draft, setDraft] = useState<AiReportConfig>(DEFAULT_AI_REPORT_CONFIG);
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [message, setMessage] = useState("");
-  const [syntheticForm, setSyntheticForm] = useState(DEFAULT_SYNTHETIC_FORM);
-  const [syntheticRows, setSyntheticRows] = useState<SyntheticScoringRecord[]>([]);
-  const [syntheticState, setSyntheticState] = useState<SyntheticState>("idle");
-  const [syntheticMessage, setSyntheticMessage] = useState("");
 
   const normalizedDraft = useMemo(() => normalizeAiReportConfig(draft), [draft]);
 
@@ -71,8 +47,10 @@ function Backoffice() {
     setMessage("");
 
     try {
-      const config = await getAiReportConfig({ data: { passcode } });
-      setDraft(config);
+      const result = await getAiReportConfig({ data: { passcode } });
+      setDraft(result.config);
+      setApiKeyConfigured(result.hasApiKey);
+      setApiKeyDraft("");
       setAuthenticated(true);
     } catch (error) {
       setAuthenticated(false);
@@ -87,71 +65,25 @@ function Backoffice() {
     setMessage("");
 
     try {
-      const result = await saveAiReportConfig({ data: { passcode, config: normalizedDraft } });
+      const result = await saveAiReportConfig({
+        data: {
+          passcode,
+          config: normalizedDraft,
+          openAiApiKey: apiKeyDraft.trim() || undefined,
+        },
+      });
       setDraft(result.config);
+      setApiKeyConfigured(result.hasApiKey);
+      setApiKeyDraft("");
       setSaveState("saved");
       setMessage(
-        `Configuration sauvegardee le ${new Date(result.savedAt).toLocaleString("fr-FR")}.`,
+        result.persisted
+          ? `Configuration sauvegardee le ${new Date(result.savedAt).toLocaleString("fr-FR")}.`
+          : "Configuration active pour cette session. Appliquez la migration Supabase securisee pour la persister.",
       );
     } catch (error) {
       setSaveState("error");
       setMessage(error instanceof Error ? error.message : "Sauvegarde impossible.");
-    }
-  };
-
-  const toggleSector = (sector: string) => {
-    setSyntheticForm((current) => ({
-      ...current,
-      sectors: current.sectors.includes(sector)
-        ? current.sectors.filter((item) => item !== sector)
-        : [...current.sectors, sector],
-    }));
-  };
-
-  const generateDummyData = async () => {
-    setSyntheticState("generating");
-    setSyntheticMessage("");
-    setSyntheticRows([]);
-
-    try {
-      const result = await generateSyntheticScoringData({
-        data: {
-          passcode,
-          apiKey: syntheticForm.apiKey,
-          baseUrl: syntheticForm.baseUrl,
-          model: syntheticForm.model,
-          rowCount: syntheticForm.rowCount,
-          sectors: syntheticForm.sectors,
-          maturityScenario: syntheticForm.maturityScenario,
-          noiseLevel: syntheticForm.noiseLevel,
-          countryContext: syntheticForm.countryContext,
-          researchContext: syntheticForm.researchContext,
-        },
-      });
-      setSyntheticRows(result.records);
-      setSyntheticState("ready");
-      setSyntheticMessage(
-        `${result.records.length} lignes synthetiques generees avec ${result.model}.`,
-      );
-    } catch (error) {
-      setSyntheticState("error");
-      setSyntheticMessage(error instanceof Error ? error.message : "Generation impossible.");
-    }
-  };
-
-  const insertDummyData = async () => {
-    setSyntheticState("inserting");
-    setSyntheticMessage("");
-
-    try {
-      await saveScoringSubmissions(syntheticRows);
-      setSyntheticState("inserted");
-      setSyntheticMessage(`${syntheticRows.length} lignes ajoutees dans scoring_test_submissions.`);
-    } catch (error) {
-      setSyntheticState("error");
-      setSyntheticMessage(
-        error instanceof Error ? error.message : "Insertion Supabase impossible.",
-      );
     }
   };
 
@@ -225,7 +157,7 @@ function Backoffice() {
                 />
                 <div>
                   <div className="text-sm font-semibold text-white">
-                    {normalizedDraft.enabled ? "Generation active" : "Generation desactivee"}
+                    {normalizedDraft.enabled ? "Rapport IA actif" : "Rapport IA desactive"}
                   </div>
                   <div className="text-xs text-white/45">{normalizedDraft.model}</div>
                 </div>
@@ -269,7 +201,7 @@ function Backoffice() {
                   title="Parametres API"
                 />
                 <ToggleField
-                  label="Generation automatique"
+                  label="Activer le rapport IA"
                   checked={draft.enabled}
                   onChange={(enabled) => setDraft({ ...draft, enabled })}
                 />
@@ -278,6 +210,17 @@ function Backoffice() {
                   value={draft.baseUrl}
                   onChange={(baseUrl) => setDraft({ ...draft, baseUrl })}
                 />
+                <TextField
+                  label={apiKeyConfigured ? "OpenAI API key (remplacer)" : "OpenAI API key"}
+                  type="password"
+                  value={apiKeyDraft}
+                  onChange={setApiKeyDraft}
+                />
+                <p className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-white/55">
+                  {apiKeyConfigured && !apiKeyDraft
+                    ? "Cle OpenAI configuree cote serveur. Laissez ce champ vide pour la conserver."
+                    : "La cle est chiffree et stockee cote serveur. Elle n'est jamais renvoyee au navigateur."}
+                </p>
                 <TextField
                   label="Modele"
                   value={draft.model}
@@ -324,186 +267,6 @@ function Backoffice() {
                 />
               </section>
             </div>
-
-            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 backdrop-blur">
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <SectionTitle
-                    icon={<Database className="h-4 w-4" />}
-                    title="Donnees synthetiques IA"
-                  />
-                  <p className="mt-1 text-sm text-white/45">
-                    Observations fictives pour analyse exploratoire, segmentation et modelisation de
-                    la maturite data.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={
-                      !syntheticForm.apiKey ||
-                      syntheticForm.sectors.length === 0 ||
-                      syntheticState === "generating"
-                    }
-                    onClick={generateDummyData}
-                    className="inline-flex items-center gap-2 rounded-xl bg-gradient-brand px-4 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    {syntheticState === "generating" ? "Generation..." : "Generer"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={syntheticRows.length === 0 || syntheticState === "inserting"}
-                    onClick={insertDummyData}
-                    className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Save className="h-4 w-4" />
-                    {syntheticState === "inserting" ? "Insertion..." : "Ajouter a Supabase"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
-                <div className="space-y-4">
-                  <TextField
-                    label="OpenAI API key"
-                    type="password"
-                    value={syntheticForm.apiKey}
-                    onChange={(apiKey) => setSyntheticForm({ ...syntheticForm, apiKey })}
-                  />
-                  <TextField
-                    label="Base URL OpenAI"
-                    value={syntheticForm.baseUrl}
-                    onChange={(baseUrl) => setSyntheticForm({ ...syntheticForm, baseUrl })}
-                  />
-                  <TextField
-                    label="Modele"
-                    value={syntheticForm.model}
-                    onChange={(model) => setSyntheticForm({ ...syntheticForm, model })}
-                  />
-                  <div className="grid grid-cols-2 gap-3">
-                    <NumberField
-                      label="Lignes"
-                      value={syntheticForm.rowCount}
-                      min={1}
-                      max={80}
-                      step={1}
-                      onChange={(rowCount) => setSyntheticForm({ ...syntheticForm, rowCount })}
-                    />
-                    <NumberField
-                      label="Bruit"
-                      value={syntheticForm.noiseLevel}
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      onChange={(noiseLevel) => setSyntheticForm({ ...syntheticForm, noiseLevel })}
-                    />
-                  </div>
-                  <SelectField
-                    label="Scenario de maturite"
-                    value={syntheticForm.maturityScenario}
-                    options={[
-                      ["mixed", "Mixte"],
-                      ["early", "Initial / faible"],
-                      ["growth", "Croissance"],
-                      ["advanced", "Avance"],
-                      ["regulated-risk", "Risque reglementaire"],
-                    ]}
-                    onChange={(maturityScenario) =>
-                      setSyntheticForm({ ...syntheticForm, maturityScenario })
-                    }
-                  />
-                  <TextField
-                    label="Pays / contexte"
-                    value={syntheticForm.countryContext}
-                    onChange={(countryContext) =>
-                      setSyntheticForm({ ...syntheticForm, countryContext })
-                    }
-                  />
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/50">
-                      Secteurs
-                    </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {SECTORS.map((sector) => (
-                        <label
-                          key={sector.id}
-                          className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-white/75"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={syntheticForm.sectors.includes(sector.id)}
-                            onChange={() => toggleSector(sector.id)}
-                            className="h-4 w-4 accent-purple-500"
-                          />
-                          <span>{sector.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <PromptPanel
-                    icon={<Cpu className="h-4 w-4" />}
-                    title="Contexte data science"
-                    value={syntheticForm.researchContext}
-                    rows={4}
-                    onChange={(researchContext) =>
-                      setSyntheticForm({ ...syntheticForm, researchContext })
-                    }
-                  />
-
-                  {syntheticMessage && (
-                    <p
-                      className={`rounded-xl border px-3 py-2 text-sm ${
-                        syntheticState === "error"
-                          ? "border-red-400/20 bg-red-400/10 text-red-100"
-                          : "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
-                      }`}
-                    >
-                      {syntheticMessage}
-                    </p>
-                  )}
-
-                  {syntheticRows.length > 0 && (
-                    <div className="overflow-hidden rounded-xl border border-white/10">
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-white/[0.06] text-xs uppercase tracking-wider text-white/45">
-                          <tr>
-                            <th className="px-3 py-2">Societe</th>
-                            <th className="px-3 py-2">Secteur</th>
-                            <th className="px-3 py-2">Score</th>
-                            <th className="px-3 py-2">Niveau</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/8">
-                          {syntheticRows.slice(0, 8).map((row) => (
-                            <tr
-                              key={`${row.classification.companyName}-${row.classification.contactEmail}`}
-                              className="text-white/75"
-                            >
-                              <td className="px-3 py-2">{row.classification.companyName}</td>
-                              <td className="px-3 py-2">{row.classification.sector}</td>
-                              <td className="px-3 py-2 tabular-nums">
-                                {Math.round(row.score.sgm)}
-                              </td>
-                              <td className="px-3 py-2">{row.score.level.level}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {syntheticRows.length > 8 && (
-                        <div className="border-t border-white/10 px-3 py-2 text-xs text-white/45">
-                          {syntheticRows.length - 8} lignes supplementaires pretes a inserer.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </section>
           </div>
         )}
       </main>
@@ -542,41 +305,6 @@ function TextField({
         onChange={(event) => onChange(event.target.value)}
         className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm font-medium text-white outline-none transition focus:border-accent/70 focus:bg-white/[0.06] focus:ring-2 focus:ring-accent/20"
       />
-    </label>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: [string, string][];
-  onChange: (value: "mixed" | "early" | "growth" | "advanced" | "regulated-risk") => void;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-white/50">
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={(event) =>
-          onChange(
-            event.target.value as "mixed" | "early" | "growth" | "advanced" | "regulated-risk",
-          )
-        }
-        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm font-medium text-white outline-none transition focus:border-accent/70 focus:bg-white/[0.06] focus:ring-2 focus:ring-accent/20"
-      >
-        {options.map(([optionValue, labelText]) => (
-          <option key={optionValue} value={optionValue} className="bg-slate-950 text-white">
-            {labelText}
-          </option>
-        ))}
-      </select>
     </label>
   );
 }

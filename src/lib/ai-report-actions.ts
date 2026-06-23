@@ -12,6 +12,12 @@ import { DIMENSIONS, RECO_MAP, SECTORS } from "@/lib/maturity-data";
 import type { AnswersMap, ScoreResult } from "@/lib/maturity-engine";
 
 let runtimeConfig: AiReportConfig = DEFAULT_AI_REPORT_CONFIG;
+let runtimeOpenAiApiKeyEncrypted = "";
+
+interface PersistedAiReportSettings {
+  config: AiReportConfig;
+  openAiApiKeyEncrypted: string;
+}
 
 const classificationSchema = z.object({
   companyName: z.string(),
@@ -72,6 +78,7 @@ const passcodeSchema = z.object({
 const saveConfigSchema = z.object({
   passcode: z.string(),
   config: aiReportConfigSchema,
+  openAiApiKey: z.string().max(320).optional(),
 });
 
 const generateReportSchema = z.object({
@@ -84,9 +91,19 @@ export const getAiReportConfig = createServerFn({ method: "POST" })
   .inputValidator((input) => passcodeSchema.parse(input))
   .handler(({ data }) => {
     assertBackofficePasscode(data.passcode);
-    return loadPersistedConfig().then((config) => {
-      if (config) runtimeConfig = config;
-      return runtimeConfig;
+    return loadPersistedSettings(data.passcode).then((settings) => {
+      if (settings) {
+        runtimeConfig = settings.config;
+        runtimeOpenAiApiKeyEncrypted = settings.openAiApiKeyEncrypted;
+      }
+      return {
+        config: runtimeConfig,
+        hasApiKey: Boolean(
+          settings?.openAiApiKeyEncrypted ||
+          runtimeOpenAiApiKeyEncrypted ||
+          readRuntimeEnv("OPENAI_API_KEY"),
+        ),
+      };
     });
   });
 
@@ -94,11 +111,21 @@ export const saveAiReportConfig = createServerFn({ method: "POST" })
   .inputValidator((input) => saveConfigSchema.parse(input))
   .handler(async ({ data }) => {
     assertBackofficePasscode(data.passcode);
+    const previousSettings = await loadPersistedSettings(data.passcode);
     runtimeConfig = normalizeAiReportConfig(data.config);
-    const persisted = await persistConfig(data.passcode, runtimeConfig);
+    const openAiApiKey = clampText(data.openAiApiKey, 320);
+    const openAiApiKeyEncrypted = openAiApiKey
+      ? await encryptSecret(openAiApiKey)
+      : (previousSettings?.openAiApiKeyEncrypted ?? runtimeOpenAiApiKeyEncrypted);
+    runtimeOpenAiApiKeyEncrypted = openAiApiKeyEncrypted;
+    const persisted = await persistSettings(data.passcode, {
+      config: runtimeConfig,
+      openAiApiKeyEncrypted,
+    });
     return {
       ok: true,
       config: runtimeConfig,
+      hasApiKey: Boolean(openAiApiKeyEncrypted || readRuntimeEnv("OPENAI_API_KEY")),
       persisted,
       savedAt: new Date().toISOString(),
     };
@@ -107,7 +134,9 @@ export const saveAiReportConfig = createServerFn({ method: "POST" })
 export const generateAiReport = createServerFn({ method: "POST" })
   .inputValidator((input) => generateReportSchema.parse(input))
   .handler(async ({ data }): Promise<AiReportGenerationResult> => {
-    const config = normalizeAiReportConfig((await loadPersistedConfig()) ?? runtimeConfig);
+    const settings = await loadPersistedSettings(readRuntimeEnv("BACKOFFICE_PASSCODE"));
+    const config = settings?.config ?? normalizeAiReportConfig(runtimeConfig);
+    if (settings) runtimeOpenAiApiKeyEncrypted = settings.openAiApiKeyEncrypted;
     runtimeConfig = config;
 
     if (!config.enabled) {
@@ -125,12 +154,13 @@ export const generateAiReport = createServerFn({ method: "POST" })
       };
     }
 
-    const apiKey = readRuntimeEnv("OPENAI_API_KEY");
+    const apiKey = await resolveOpenAiApiKey(
+      settings?.openAiApiKeyEncrypted ?? runtimeOpenAiApiKeyEncrypted,
+    );
     if (!apiKey) {
       return {
         status: "missing-key",
-        message:
-          "Ajoutez OPENAI_API_KEY dans les variables d'environnement serveur pour activer la generation.",
+        message: "Ajoutez la cle OpenAI dans le backoffice pour activer la generation.",
       };
     }
 
@@ -170,37 +200,43 @@ function assertBackofficePasscode(passcode: string) {
   }
 }
 
-async function loadPersistedConfig(): Promise<AiReportConfig | null> {
+async function loadPersistedSettings(passcode?: string): Promise<PersistedAiReportSettings | null> {
   const supabase = getSupabaseRuntime();
-  if (!supabase) return null;
+  if (!supabase || !passcode) return null;
 
   try {
-    const response = await fetch(
-      `${supabase.url}/rest/v1/ai_report_settings?id=eq.default&select=config`,
-      {
-        headers: {
-          apikey: supabase.key,
-          authorization: `Bearer ${supabase.key}`,
-          accept: "application/json",
-        },
+    const rpcResponse = await fetch(`${supabase.url}/rest/v1/rpc/get_ai_report_settings`, {
+      method: "POST",
+      headers: {
+        apikey: supabase.key,
+        authorization: `Bearer ${supabase.key}`,
+        "content-type": "application/json",
+        accept: "application/json",
       },
-    );
+      body: JSON.stringify({ p_passcode: passcode }),
+    });
 
-    if (!response.ok) return null;
-    const rows = (await response.json()) as Array<{ config?: unknown }>;
-    const config = rows[0]?.config;
-    if (!config || typeof config !== "object") return null;
-    return normalizeAiReportConfig(config as AiReportConfig);
+    if (rpcResponse.ok) {
+      return unpackPersistedSettings(await rpcResponse.json());
+    }
   } catch {
     return null;
   }
+
+  return null;
 }
 
-async function persistConfig(passcode: string, config: AiReportConfig): Promise<boolean> {
+async function persistSettings(
+  passcode: string,
+  settings: PersistedAiReportSettings,
+): Promise<boolean> {
   const supabase = getSupabaseRuntime();
   if (!supabase) return false;
 
   try {
+    const secureReadAvailable = await canUseSecureSettingsRpc(supabase, passcode);
+    if (!secureReadAvailable) return false;
+
     const response = await fetch(`${supabase.url}/rest/v1/rpc/update_ai_report_settings`, {
       method: "POST",
       headers: {
@@ -211,7 +247,7 @@ async function persistConfig(passcode: string, config: AiReportConfig): Promise<
       },
       body: JSON.stringify({
         p_passcode: passcode,
-        p_config: config,
+        p_config: packPersistedSettings(settings),
       }),
     });
 
@@ -219,6 +255,48 @@ async function persistConfig(passcode: string, config: AiReportConfig): Promise<
   } catch {
     return false;
   }
+}
+
+async function canUseSecureSettingsRpc(
+  supabase: { url: string; key: string },
+  passcode: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(`${supabase.url}/rest/v1/rpc/get_ai_report_settings`, {
+      method: "POST",
+      headers: {
+        apikey: supabase.key,
+        authorization: `Bearer ${supabase.key}`,
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({ p_passcode: passcode }),
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function unpackPersistedSettings(value: unknown): PersistedAiReportSettings | null {
+  if (!value || typeof value !== "object") return null;
+  const fields = value as Record<string, unknown>;
+  return {
+    config: normalizeAiReportConfig(fields as unknown as AiReportConfig),
+    openAiApiKeyEncrypted:
+      clampText(fields.openAiApiKeyEncrypted, 2000) ||
+      clampText(fields.__openAiApiKeyEncrypted, 2000),
+  };
+}
+
+function packPersistedSettings(settings: PersistedAiReportSettings) {
+  return {
+    ...settings.config,
+    ...(settings.openAiApiKeyEncrypted
+      ? { openAiApiKeyEncrypted: settings.openAiApiKeyEncrypted }
+      : {}),
+  };
 }
 
 function getSupabaseRuntime(): { url: string; key: string } | null {
@@ -231,6 +309,99 @@ function getSupabaseRuntime(): { url: string; key: string } | null {
     url: url.replace(/\/+$/, ""),
     key,
   };
+}
+
+async function resolveOpenAiApiKey(openAiApiKeyEncrypted: string): Promise<string> {
+  if (openAiApiKeyEncrypted) {
+    try {
+      const decrypted = await decryptSecret(openAiApiKeyEncrypted);
+      if (decrypted) return decrypted;
+    } catch (error) {
+      const envFallback = readRuntimeEnv("OPENAI_API_KEY");
+      if (envFallback) return envFallback;
+      throw new Error(
+        error instanceof Error
+          ? `La cle OpenAI sauvegardee est illisible: ${error.message}`
+          : "La cle OpenAI sauvegardee est illisible.",
+      );
+    }
+  }
+
+  return readRuntimeEnv("OPENAI_API_KEY");
+}
+
+async function encryptSecret(secret: string): Promise<string> {
+  const cryptoApi = getCryptoApi();
+  const key = await deriveSecretKey();
+  const iv = cryptoApi.getRandomValues(new Uint8Array(12));
+  const encrypted = await cryptoApi.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(secret),
+  );
+
+  return `v1.${bytesToBase64Url(iv)}.${bytesToBase64Url(new Uint8Array(encrypted))}`;
+}
+
+async function decryptSecret(encryptedSecret: string): Promise<string> {
+  const [version, ivValue, encryptedValue] = encryptedSecret.split(".");
+  if (version !== "v1" || !ivValue || !encryptedValue) {
+    throw new Error("format de stockage invalide");
+  }
+
+  const cryptoApi = getCryptoApi();
+  const decrypted = await cryptoApi.subtle.decrypt(
+    { name: "AES-GCM", iv: base64UrlToBytes(ivValue) },
+    await deriveSecretKey(),
+    base64UrlToBytes(encryptedValue),
+  );
+
+  return new TextDecoder().decode(decrypted).trim();
+}
+
+async function deriveSecretKey(): Promise<CryptoKey> {
+  const secret =
+    readRuntimeEnv("OPENAI_API_KEY_ENCRYPTION_SECRET") || readRuntimeEnv("BACKOFFICE_PASSCODE");
+  if (!secret) {
+    throw new Error("OPENAI_API_KEY_ENCRYPTION_SECRET ou BACKOFFICE_PASSCODE est requis.");
+  }
+
+  const cryptoApi = getCryptoApi();
+  const digest = await cryptoApi.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`evalitx-openai-key:${secret}`),
+  );
+
+  return cryptoApi.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
+function getCryptoApi(): Crypto {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi?.subtle) {
+    throw new Error("Web Crypto n'est pas disponible cote serveur.");
+  }
+  return cryptoApi;
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
 }
 
 function getMissingAnswers(answers: AnswersMap): string[] {

@@ -1,4 +1,6 @@
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
 BACKOFFICE_PASSCODE=change-this-passcode
-OPENAI_API_KEY=your-openai-api-key
+OPENAI_API_KEY_ENCRYPTION_SECRET=change-this-long-random-secret
+# Optional fallback if no key is saved in the backoffice.
+OPENAI_API_KEY=

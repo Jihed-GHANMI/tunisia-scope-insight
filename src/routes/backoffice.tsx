@@ -284,14 +284,6 @@ function Backoffice() {
                   onChange={(model) => setDraft({ ...draft, model })}
                 />
                 <NumberField
-                  label="Temperature"
-                  value={draft.temperature}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  onChange={(temperature) => setDraft({ ...draft, temperature })}
-                />
-                <NumberField
                   label="Max output tokens"
                   value={draft.maxTokens}
                   min={512}

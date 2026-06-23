@@ -58,7 +58,6 @@ const aiReportConfigSchema = z.object({
   enabled: z.boolean(),
   baseUrl: z.string(),
   model: z.string(),
-  temperature: z.number(),
   maxTokens: z.number(),
   systemPrompt: z.string(),
   advicePrompt: z.string(),
@@ -364,15 +363,9 @@ async function callOpenAiResponsesApi(
   score: ScoreResult,
 ) {
   const endpoint = resolveOpenAiResponsesEndpoint(config.baseUrl);
-  let body = buildOpenAiReportRequest(config, classification, answers, score, true);
-  let response = await postOpenAiRequest(endpoint, apiKey, body);
-  let payload = await parseJsonResponse(response);
-
-  if (!response.ok && shouldRetryWithoutTemperature(response.status, payload)) {
-    body = buildOpenAiReportRequest(config, classification, answers, score, false);
-    response = await postOpenAiRequest(endpoint, apiKey, body);
-    payload = await parseJsonResponse(response);
-  }
+  const body = buildOpenAiReportRequest(config, classification, answers, score);
+  const response = await postOpenAiRequest(endpoint, apiKey, body);
+  const payload = await parseJsonResponse(response);
 
   if (!response.ok) {
     throw new Error(
@@ -399,7 +392,6 @@ function buildOpenAiReportRequest(
   classification: ClassificationData,
   answers: AnswersMap,
   score: ScoreResult,
-  includeTemperature: boolean,
 ) {
   const body: Record<string, unknown> = {
     model: config.model,
@@ -421,10 +413,6 @@ function buildOpenAiReportRequest(
       format: AI_REPORT_RESPONSE_FORMAT,
     },
   };
-
-  if (includeTemperature) {
-    body.temperature = config.temperature;
-  }
 
   return body;
 }
@@ -451,15 +439,6 @@ function buildOpenAiHeaders(apiKey: string): Record<string, string> {
   if (project) headers["OpenAI-Project"] = project;
 
   return headers;
-}
-
-function shouldRetryWithoutTemperature(status: number, payload: unknown): boolean {
-  if (status !== 400) return false;
-  const message = extractErrorMessage(payload).toLowerCase();
-  return (
-    message.includes("temperature") &&
-    (message.includes("support") || message.includes("unknown") || message.includes("invalid"))
-  );
 }
 
 async function parseJsonResponse(response: Response): Promise<unknown> {

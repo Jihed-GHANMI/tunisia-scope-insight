@@ -78,7 +78,6 @@ async function callOpenAiSyntheticGenerator(data: z.infer<typeof syntheticGenera
           ],
         },
       ],
-      temperature: 0.65,
       max_output_tokens: Math.min(6000, Math.max(1800, data.rowCount * 220)),
       store: false,
       text: {

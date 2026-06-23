@@ -2,7 +2,6 @@ export interface AiReportConfig {
   enabled: boolean;
   baseUrl: string;
   model: string;
-  temperature: number;
   maxTokens: number;
   systemPrompt: string;
   advicePrompt: string;
@@ -40,7 +39,6 @@ export const DEFAULT_AI_REPORT_CONFIG: AiReportConfig = {
   enabled: true,
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-5.5",
-  temperature: 0.2,
   maxTokens: 2200,
   systemPrompt: [
     "Tu es un consultant senior en maturite digitale, data governance et transformation des organisations tunisiennes.",
@@ -86,7 +84,6 @@ export function normalizeAiReportConfig(config: AiReportConfig): AiReportConfig 
     enabled: Boolean(config.enabled),
     baseUrl: normalizeOpenAiBaseUrl(config.baseUrl),
     model: normalizeOpenAiModel(config.model),
-    temperature: clampNumber(config.temperature, 0, 1, DEFAULT_AI_REPORT_CONFIG.temperature),
     maxTokens: Math.round(
       clampNumber(config.maxTokens, 512, 4096, DEFAULT_AI_REPORT_CONFIG.maxTokens),
     ),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Radar,
@@ -11,7 +11,6 @@ import {
 } from "recharts";
 import { AlertTriangle, CheckCircle2, RefreshCw, Sparkles } from "lucide-react";
 import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 import type { AnswersMap, ScoreResult } from "@/lib/maturity-engine";
 import { dimensionVerdict } from "@/lib/maturity-engine";
 import { DIMENSIONS, RECO_MAP, SECTORS } from "@/lib/maturity-data";
@@ -28,7 +27,6 @@ interface Props {
 }
 
 export function Report({ score, classification, answers, saveStatus, onRestart }: Props) {
-  const reportRef = useRef<HTMLDivElement>(null);
   const [aiReport, setAiReport] = useState<AiReportGenerationResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const sectorLabel =
@@ -73,23 +71,17 @@ export function Report({ score, classification, answers, saveStatus, onRestart }
     void requestAiReport();
   }, [generationKey, requestAiReport]);
 
-  const exportPDF = async () => {
-    if (!reportRef.current) return;
-    const canvas = await html2canvas(reportRef.current, { scale: 2, backgroundColor: "#0a0e27" });
-    const img = canvas.toDataURL("image/png");
-    const pdf = new jsPDF("p", "mm", "a4");
-    const w = pdf.internal.pageSize.getWidth();
-    const h = (canvas.height * w) / canvas.width;
-    let position = 0;
-    let remaining = h;
-    const pageH = pdf.internal.pageSize.getHeight();
-    while (remaining > 0) {
-      pdf.addImage(img, "PNG", 0, position, w, h);
-      remaining -= pageH;
-      position -= pageH;
-      if (remaining > 0) pdf.addPage();
-    }
-    pdf.save("rapport-evalitx-ai.pdf");
+  const exportPDF = () => {
+    const pdf = buildTwoPagePdf({
+      score,
+      classification,
+      sectorLabel,
+      recommendations: recos,
+      aiReport: aiReport?.status === "ready" ? aiReport.report : null,
+    });
+    const fileCompany =
+      sanitizeFileName(classification.companyName || "societe-test") || "societe-test";
+    pdf.save(`rapport-evalitx-ai-${fileCompany}.pdf`);
   };
 
   return (
@@ -121,11 +113,7 @@ export function Report({ score, classification, answers, saveStatus, onRestart }
         </motion.button>
       </div>
 
-      <div
-        ref={reportRef}
-        className="mx-auto max-w-6xl space-y-6"
-        style={{ background: "#0a0e27" }}
-      >
+      <div className="mx-auto max-w-6xl space-y-6" style={{ background: "#0a0e27" }}>
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -387,7 +375,7 @@ function AiReportSection({
         <div className="flex items-center gap-3 text-white">
           <RefreshCw className="h-5 w-5 animate-spin text-purple-300" />
           <div>
-            <h2 className="text-xl font-bold">Rapport IA NVIDIA</h2>
+            <h2 className="text-xl font-bold">Rapport IA OpenAI</h2>
             <p className="mt-1 text-sm text-white/55">
               Generation du diagnostic augmente en cours...
             </p>
@@ -401,7 +389,7 @@ function AiReportSection({
     return (
       <AiReportNotice
         tone="neutral"
-        title="Rapport IA NVIDIA"
+        title="Rapport IA OpenAI"
         message="La generation se lancera automatiquement a la fin de l'evaluation."
       />
     );
@@ -414,7 +402,7 @@ function AiReportSection({
         : result.status === "missing-key"
           ? "warning"
           : "error";
-    return <AiReportNotice tone={tone} title="Rapport IA NVIDIA" message={result.message} />;
+    return <AiReportNotice tone={tone} title="Rapport IA OpenAI" message={result.message} />;
   }
 
   return (
@@ -423,7 +411,7 @@ function AiReportSection({
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-purple-200">
             <Sparkles className="h-4 w-4" />
-            Rapport IA NVIDIA
+            Rapport IA OpenAI
           </div>
           <h2 className="mt-1 text-xl font-bold text-white">Diagnostic augmente</h2>
         </div>
@@ -605,4 +593,281 @@ function buildRecommendations(sortedDims: ScoreResult["dims"]) {
   sortedDims.slice(3, 4).forEach((d) => recos.push({ priority: "P2", ...RECO_MAP[d.code] }));
   sortedDims.slice(4, 5).forEach((d) => recos.push({ priority: "P3", ...RECO_MAP[d.code] }));
   return recos;
+}
+
+type PdfRecommendation = ReturnType<typeof buildRecommendations>[number];
+
+function buildTwoPagePdf({
+  score,
+  classification,
+  sectorLabel,
+  recommendations,
+  aiReport,
+}: {
+  score: ScoreResult;
+  classification: ClassificationData;
+  sectorLabel: string;
+  recommendations: PdfRecommendation[];
+  aiReport: AiReportContent | null;
+}) {
+  const companyName = classification.companyName.trim() || "Societe de test";
+  const pdfReport =
+    aiReport ?? buildLocalPdfReport(companyName, sectorLabel, score, recommendations);
+  const pdf = new jsPDF("p", "mm", "a4");
+  const weakDims = [...score.dims].sort((a, b) => a.normalized - b.normalized).slice(0, 3);
+
+  pdf.setProperties({
+    title: `Rapport EvalitX AI - ${companyName}`,
+    subject: "Diagnostic de maturite digitale et data",
+    author: "EvalitX AI",
+  });
+
+  drawPdfShell(pdf, 1);
+  drawPdfTitle(pdf, "Rapport IA OpenAI", companyName, "Diagnostic de maturite digitale et data");
+  drawPdfMeta(pdf, [
+    ["Secteur", sectorLabel],
+    ["Taille", classification.size || "Non renseignee"],
+    ["Niveau", `${score.level.level} - ${score.level.name}`],
+  ]);
+
+  drawScorePanel(pdf, score);
+  drawDimensionBars(pdf, score, 101);
+
+  let y = 171;
+  y = drawSectionTitle(pdf, "Synthese executive personnalisee", y);
+  y = drawWrappedText(pdf, pdfReport.executiveSummary, 16, y, 178, 5.2, 11, [31, 41, 55], 220);
+  y += 5;
+  y = drawSectionTitle(pdf, "Diagnostic prioritaire", y);
+  drawWrappedText(pdf, pdfReport.priorityDiagnosis, 16, y, 178, 5.2, 10.5, [51, 65, 85], 235);
+  drawFooter(pdf, 1);
+
+  pdf.addPage("a4", "p");
+  drawPdfShell(pdf, 2);
+  drawPdfTitle(
+    pdf,
+    "Plan d'action en 2 pages A4",
+    companyName,
+    "Priorites, risques et feuille de route",
+  );
+
+  y = 54;
+  y = drawSectionTitle(pdf, "Quick wins recommandes", y);
+  y = drawBulletList(pdf, pdfReport.quickWins, 18, y, 176, 4, 160);
+
+  y += 5;
+  y = drawSectionTitle(pdf, "Risques majeurs a surveiller", y);
+  y = drawBulletList(pdf, pdfReport.risks, 18, y, 176, 4, 150);
+
+  y += 5;
+  y = drawSectionTitle(pdf, "Feuille de route", y);
+  for (const block of pdfReport.roadmap.slice(0, 3)) {
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10);
+    pdf.setTextColor(79, 70, 229);
+    pdf.text(cleanPdfText(block.horizon), 18, y);
+    y += 5;
+    y = drawBulletList(pdf, block.actions, 22, y, 168, 3, 110);
+    y += 2;
+  }
+
+  y += 3;
+  y = drawSectionTitle(pdf, "Signaux faibles detectes", y);
+  const weakSignals = weakDims.map(
+    (dimension) =>
+      `${dimension.code} - ${dimension.name}: ${Math.round(dimension.normalized)}% (${dimensionVerdict(dimension.normalized)})`,
+  );
+  y = drawBulletList(pdf, weakSignals, 18, y, 176, 3, 150);
+
+  y += 5;
+  y = drawSectionTitle(pdf, "Points de vigilance", y);
+  drawBulletList(pdf, pdfReport.redFlags, 18, y, 176, 3, 150);
+  drawFooter(pdf, 2);
+
+  return pdf;
+}
+
+function buildLocalPdfReport(
+  companyName: string,
+  sectorLabel: string,
+  score: ScoreResult,
+  recommendations: PdfRecommendation[],
+): AiReportContent {
+  const weakDims = [...score.dims].sort((a, b) => a.normalized - b.normalized).slice(0, 3);
+
+  return {
+    executiveSummary: `${companyName} obtient un score global de ${Math.round(score.sgm)}/100, niveau ${score.level.level} - ${score.level.name}. Le contexte declare est ${sectorLabel}. La maturite data atteint ${Math.round(score.dataMaturity)}/100 et la maturite digitale ${Math.round(score.digitalMaturity)}/100. Le diagnostic met en evidence des priorites sur ${weakDims.map((dimension) => dimension.name).join(", ")}.`,
+    priorityDiagnosis: `Pour ${companyName}, la priorite est de transformer le questionnaire en plan d'action court: clarifier les responsabilites data, securiser les donnees critiques, puis industrialiser quelques tableaux de bord ou cas d'usage mesurables. Les actions proposees ci-dessous visent une version realiste pour PFE et PME/ETI tunisiennes.`,
+    quickWins: recommendations.slice(0, 5).map((recommendation) => recommendation.action),
+    roadmap: [
+      {
+        horizon: "0-3 mois",
+        actions: recommendations.slice(0, 2).map((recommendation) => recommendation.title),
+      },
+      {
+        horizon: "3-9 mois",
+        actions: recommendations.slice(2, 4).map((recommendation) => recommendation.title),
+      },
+      {
+        horizon: "9-18 mois",
+        actions: recommendations.slice(4, 5).map((recommendation) => recommendation.title),
+      },
+    ],
+    risks: weakDims.map(
+      (dimension) =>
+        `${dimension.name}: niveau ${Math.round(dimension.normalized)}%, risque de progression lente sans pilotage formel.`,
+    ),
+    redFlags: [
+      "Ne pas interpreter ce rapport comme un audit officiel ou une certification.",
+      "Verifier les reponses avec les responsables metier avant arbitrage budgetaire.",
+      "Prioriser securite, qualite et gouvernance avant les usages IA avances.",
+    ],
+  };
+}
+
+function drawPdfShell(pdf: jsPDF, page: number) {
+  pdf.setFillColor(248, 250, 252);
+  pdf.rect(0, 0, 210, 297, "F");
+  pdf.setFillColor(255, 255, 255);
+  pdf.roundedRect(10, 10, 190, 277, 3, 3, "F");
+  pdf.setDrawColor(226, 232, 240);
+  pdf.roundedRect(10, 10, 190, 277, 3, 3, "S");
+  pdf.setFillColor(79, 70, 229);
+  pdf.rect(10, 10, 190, page === 1 ? 31 : 28, "F");
+}
+
+function drawPdfTitle(pdf: jsPDF, title: string, companyName: string, subtitle: string) {
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(11);
+  pdf.text("EvalitX AI", 16, 21);
+  pdf.setFontSize(20);
+  pdf.text(cleanPdfText(title), 16, 31);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(10);
+  pdf.text(cleanPdfText(`${subtitle} - ${companyName}`), 16, 38);
+}
+
+function drawPdfMeta(pdf: jsPDF, items: [string, string][]) {
+  let x = 16;
+  for (const [label, value] of items) {
+    pdf.setFillColor(241, 245, 249);
+    pdf.roundedRect(x, 50, 55, 15, 2, 2, "F");
+    pdf.setTextColor(100, 116, 139);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(7.5);
+    pdf.text(cleanPdfText(label.toUpperCase()), x + 3, 56);
+    pdf.setTextColor(15, 23, 42);
+    pdf.setFontSize(8.5);
+    pdf.text(pdf.splitTextToSize(cleanPdfText(value), 48).slice(0, 1), x + 3, 62);
+    x += 60;
+  }
+}
+
+function drawScorePanel(pdf: jsPDF, score: ScoreResult) {
+  pdf.setFillColor(15, 23, 42);
+  pdf.roundedRect(16, 72, 178, 22, 3, 3, "F");
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(24);
+  pdf.text(`${Math.round(score.sgm)}/100`, 22, 87);
+  pdf.setFontSize(10);
+  pdf.text(cleanPdfText(`${score.level.level} - ${score.level.name}`), 65, 81);
+  pdf.setFont("helvetica", "normal");
+  pdf.setTextColor(203, 213, 225);
+  pdf.text(`Maturite data: ${Math.round(score.dataMaturity)}/100`, 65, 88);
+  pdf.text(`Maturite digitale: ${Math.round(score.digitalMaturity)}/100`, 125, 88);
+}
+
+function drawDimensionBars(pdf: jsPDF, score: ScoreResult, startY: number) {
+  let y = drawSectionTitle(pdf, "Scores par dimension", startY);
+  for (const dimension of score.dims) {
+    const label = `${dimension.code} ${dimension.name}`;
+    const value = Math.round(dimension.normalized);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(51, 65, 85);
+    pdf.text(cleanPdfText(label), 16, y);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`${value}%`, 180, y);
+    pdf.setFillColor(226, 232, 240);
+    pdf.roundedRect(16, y + 2, 178, 3.5, 1.5, 1.5, "F");
+    pdf.setFillColor(
+      value < 40 ? 239 : value < 60 ? 249 : 124,
+      value < 40 ? 68 : 115,
+      value < 60 ? 22 : 242,
+    );
+    pdf.roundedRect(16, y + 2, Math.max(3, (178 * value) / 100), 3.5, 1.5, 1.5, "F");
+    y += 9;
+  }
+}
+
+function drawSectionTitle(pdf: jsPDF, title: string, y: number) {
+  pdf.setTextColor(79, 70, 229);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(11);
+  pdf.text(cleanPdfText(title.toUpperCase()), 16, y);
+  return y + 7;
+}
+
+function drawWrappedText(
+  pdf: jsPDF,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+  lineHeight: number,
+  fontSize: number,
+  color: [number, number, number],
+  maxChars: number,
+) {
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(fontSize);
+  pdf.setTextColor(...color);
+  const lines = pdf.splitTextToSize(cleanPdfText(text).slice(0, maxChars), width);
+  pdf.text(lines, x, y);
+  return y + lines.length * lineHeight;
+}
+
+function drawBulletList(
+  pdf: jsPDF,
+  items: string[],
+  x: number,
+  y: number,
+  width: number,
+  maxItems: number,
+  maxChars: number,
+) {
+  const safeItems = items.length ? items : ["Action a definir."];
+  for (const item of safeItems.slice(0, maxItems)) {
+    pdf.setFillColor(124, 58, 237);
+    pdf.circle(x, y - 1.5, 1.2, "F");
+    y = drawWrappedText(pdf, item, x + 5, y, width, 4.4, 9.2, [51, 65, 85], maxChars) + 1.5;
+  }
+  return y;
+}
+
+function drawFooter(pdf: jsPDF, page: number) {
+  pdf.setDrawColor(226, 232, 240);
+  pdf.line(16, 276, 194, 276);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(8);
+  pdf.setTextColor(100, 116, 139);
+  pdf.text("EvalitX AI - Rapport de diagnostic PFE", 16, 282);
+  pdf.text(`Page ${page}/2`, 181, 282);
+}
+
+function cleanPdfText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E\n]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sanitizeFileName(value: string) {
+  return cleanPdfText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }

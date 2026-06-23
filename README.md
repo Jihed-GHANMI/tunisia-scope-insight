@@ -1,7 +1,7 @@
 # Tunisia Scope Insight
 
 Application PFE pour evaluer la maturite digitale et data d'une organisation:
-questionnaire, scoring, rapport PDF, sauvegarde Supabase et rapport IA NVIDIA.
+questionnaire, scoring, rapport PDF, sauvegarde Supabase et rapport IA OpenAI.
 
 ## Demarrage local
 
@@ -19,7 +19,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 SUPABASE_URL
 SUPABASE_PUBLISHABLE_KEY
 BACKOFFICE_PASSCODE
-NVIDIA_API_KEY
+OPENAI_API_KEY
 ```
 
 3. Lancer l'application:
@@ -46,13 +46,13 @@ Le script accepte `SUPABASE_DB_URL`, ou bien `SUPABASE_PROJECT_REF` + `PGPASSWOR
 Si `BACKOFFICE_PASSCODE` est present, le hash utilise par la fonction SQL est aligne
 automatiquement avec ce passcode.
 
-## Infra NVIDIA
+## Infra OpenAI
 
-La generation IA du rapport utilise l'API NVIDIA compatible chat completions.
+La generation IA du rapport utilise l'API OpenAI Responses.
 Configurer la variable serveur suivante dans l'environnement de deploiement:
 
 ```bash
-NVIDIA_API_KEY=...
+OPENAI_API_KEY=...
 ```
 
 Sans cette cle, l'application continue de fonctionner, mais la section IA affiche
@@ -75,7 +75,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 SUPABASE_URL
 SUPABASE_PUBLISHABLE_KEY
 BACKOFFICE_PASSCODE
-NVIDIA_API_KEY
+OPENAI_API_KEY
 ```
 
 ## Verification avant livraison

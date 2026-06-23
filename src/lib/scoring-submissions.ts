@@ -1,13 +1,13 @@
 import type { ClassificationData } from "@/components/maturity/Classification";
 import type { AnswersMap, ScoreResult } from "@/lib/maturity-engine";
-import { supabase } from "@/lib/supabase";
+import { getSupabaseClient } from "@/lib/supabase";
 
 export async function saveScoringSubmission(
   classification: ClassificationData,
   answers: AnswersMap,
   score: ScoreResult,
 ) {
-  const { error } = await supabase
+  const { error } = await getSupabaseClient()
     .from("scoring_test_submissions")
     .insert(buildSubmissionRow(classification, answers, score));
 
@@ -19,7 +19,7 @@ export async function saveScoringSubmission(
 export async function saveScoringSubmissions(
   submissions: { classification: ClassificationData; answers: AnswersMap; score: ScoreResult }[],
 ) {
-  const { error } = await supabase
+  const { error } = await getSupabaseClient()
     .from("scoring_test_submissions")
     .insert(
       submissions.map(({ classification, answers, score }) =>

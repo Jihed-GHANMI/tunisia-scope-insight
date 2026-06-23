@@ -29,7 +29,7 @@ export const Route = createFileRoute("/backoffice")({
   head: () => ({
     meta: [
       { title: "Backoffice EvalitX AI" },
-      { name: "description", content: "Parametrage du rapport IA NVIDIA EvalitX." },
+      { name: "description", content: "Parametrage du rapport IA OpenAI EvalitX." },
     ],
   }),
   component: Backoffice,
@@ -157,18 +157,22 @@ function Backoffice() {
 
   return (
     <div className="min-h-screen text-foreground">
-      <header className="border-b border-white/10 bg-background/70 backdrop-blur-xl">
+      <header className="border-b border-slate-200/80 bg-white/95 text-slate-950 shadow-[0_14px_45px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-white/45">
-              <ShieldCheck className="h-4 w-4" />
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-violet-600">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-[0_10px_24px_-12px_rgba(139,92,246,0.75)]">
+                <ShieldCheck className="h-4 w-4" />
+              </span>
               Backoffice
             </div>
-            <h1 className="mt-1 text-2xl font-bold text-white">Parametrage du rapport IA NVIDIA</h1>
+            <h1 className="mt-1 text-2xl font-bold text-slate-950">
+              Parametrage du rapport IA OpenAI
+            </h1>
           </div>
           <Link
             to="/"
-            className="rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/80 transition hover:bg-white/10"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-violet-200 hover:text-violet-700 hover:shadow-[0_10px_26px_-18px_rgba(79,70,229,0.55)]"
           >
             Retour evaluation
           </Link>
@@ -270,7 +274,7 @@ function Backoffice() {
                   onChange={(enabled) => setDraft({ ...draft, enabled })}
                 />
                 <TextField
-                  label="Base URL NVIDIA"
+                  label="Base URL OpenAI"
                   value={draft.baseUrl}
                   onChange={(baseUrl) => setDraft({ ...draft, baseUrl })}
                 />
@@ -288,10 +292,10 @@ function Backoffice() {
                   onChange={(temperature) => setDraft({ ...draft, temperature })}
                 />
                 <NumberField
-                  label="Max tokens"
+                  label="Max output tokens"
                   value={draft.maxTokens}
                   min={512}
-                  max={2048}
+                  max={4096}
                   step={64}
                   onChange={(maxTokens) => setDraft({ ...draft, maxTokens })}
                 />
@@ -370,13 +374,13 @@ function Backoffice() {
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
                 <div className="space-y-4">
                   <TextField
-                    label="NVIDIA API key"
+                    label="OpenAI API key"
                     type="password"
                     value={syntheticForm.apiKey}
                     onChange={(apiKey) => setSyntheticForm({ ...syntheticForm, apiKey })}
                   />
                   <TextField
-                    label="Base URL NVIDIA"
+                    label="Base URL OpenAI"
                     value={syntheticForm.baseUrl}
                     onChange={(baseUrl) => setSyntheticForm({ ...syntheticForm, baseUrl })}
                   />

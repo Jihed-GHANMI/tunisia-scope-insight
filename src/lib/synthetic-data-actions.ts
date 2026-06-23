@@ -47,7 +47,7 @@ export const generateSyntheticScoringData = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<SyntheticGenerationResult> => {
     assertBackofficePasscode(data.passcode);
 
-    const records = await callNvidiaSyntheticGenerator(data);
+    const records = await callOpenAiSyntheticGenerator(data);
 
     return {
       records,
@@ -56,8 +56,8 @@ export const generateSyntheticScoringData = createServerFn({ method: "POST" })
     };
   });
 
-async function callNvidiaSyntheticGenerator(data: z.infer<typeof syntheticGenerationSchema>) {
-  const response = await fetch(resolveChatCompletionsEndpoint(data.baseUrl), {
+async function callOpenAiSyntheticGenerator(data: z.infer<typeof syntheticGenerationSchema>) {
+  const response = await fetch(resolveOpenAiResponsesEndpoint(data.baseUrl), {
     method: "POST",
     headers: {
       accept: "application/json",
@@ -66,19 +66,26 @@ async function callNvidiaSyntheticGenerator(data: z.infer<typeof syntheticGenera
     },
     body: JSON.stringify({
       model: data.model,
-      temperature: 0.65,
-      max_tokens: Math.min(6000, Math.max(1800, data.rowCount * 220)),
-      stream: false,
-      messages: [
-        {
-          role: "system",
-          content: buildSyntheticSystemPrompt(),
-        },
+      instructions: buildSyntheticSystemPrompt(),
+      input: [
         {
           role: "user",
-          content: JSON.stringify(buildSyntheticRequest(data), null, 2),
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify(buildSyntheticRequest(data), null, 2),
+            },
+          ],
         },
       ],
+      temperature: 0.65,
+      max_output_tokens: Math.min(6000, Math.max(1800, data.rowCount * 220)),
+      store: false,
+      text: {
+        format: {
+          type: "json_object",
+        },
+      },
     }),
   });
 
@@ -86,13 +93,13 @@ async function callNvidiaSyntheticGenerator(data: z.infer<typeof syntheticGenera
 
   if (!response.ok) {
     throw new Error(
-      extractErrorMessage(payload) || `NVIDIA API a retourne HTTP ${response.status}.`,
+      extractErrorMessage(payload) || `OpenAI API a retourne HTTP ${response.status}.`,
     );
   }
 
-  const content = extractAssistantContent(payload);
+  const content = extractOpenAiOutputText(payload);
   if (!content) {
-    throw new Error("La reponse NVIDIA ne contient pas de contenu assistant.");
+    throw new Error("La reponse OpenAI ne contient pas de texte de sortie.");
   }
 
   return normalizeSyntheticRecords(content, data);
@@ -273,8 +280,8 @@ async function parseJsonResponse(response: Response): Promise<unknown> {
     return JSON.parse(text);
   } catch {
     if (!response.ok)
-      throw new Error(`NVIDIA API a retourne une reponse non JSON: ${text.slice(0, 180)}`);
-    throw new Error("NVIDIA API a retourne une reponse non JSON.");
+      throw new Error(`OpenAI API a retourne une reponse non JSON: ${text.slice(0, 180)}`);
+    throw new Error("OpenAI API a retourne une reponse non JSON.");
   }
 }
 
@@ -285,19 +292,50 @@ function extractJsonObject(content: string): string {
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) {
-    throw new Error("La sortie NVIDIA n'est pas un objet JSON valide.");
+    throw new Error("La sortie OpenAI n'est pas un objet JSON valide.");
   }
   return candidate.slice(start, end + 1);
 }
 
-function extractAssistantContent(payload: unknown): string {
+function extractOpenAiOutputText(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
+  const fields = payload as Record<string, unknown>;
+
+  if (typeof fields.output_text === "string") {
+    return fields.output_text.trim();
+  }
+
+  if (Array.isArray(fields.output)) {
+    const parts = fields.output.flatMap((item) => extractOutputItemText(item));
+    const joined = parts.filter(Boolean).join("\n").trim();
+    if (joined) return joined;
+  }
+
   const choices = (payload as { choices?: unknown }).choices;
   if (!Array.isArray(choices) || choices.length === 0) return "";
   const first = choices[0] as { message?: { content?: unknown }; text?: unknown };
   if (typeof first.message?.content === "string") return first.message.content;
   if (typeof first.text === "string") return first.text;
   return "";
+}
+
+function extractOutputItemText(item: unknown): string[] {
+  if (!item || typeof item !== "object") return [];
+  const fields = item as Record<string, unknown>;
+  if (typeof fields.text === "string") return [fields.text];
+  if (typeof fields.content === "string") return [fields.content];
+  if (!Array.isArray(fields.content)) return [];
+
+  return fields.content
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const partFields = part as Record<string, unknown>;
+      if (typeof partFields.text === "string") return partFields.text;
+      if (typeof partFields.output_text === "string") return partFields.output_text;
+      if (typeof partFields.content === "string") return partFields.content;
+      return "";
+    })
+    .filter(Boolean);
 }
 
 function extractErrorMessage(payload: unknown): string {
@@ -313,9 +351,12 @@ function extractErrorMessage(payload: unknown): string {
   return "";
 }
 
-function resolveChatCompletionsEndpoint(baseUrl: string): string {
+function resolveOpenAiResponsesEndpoint(baseUrl: string): string {
   const normalized = (baseUrl || DEFAULT_AI_REPORT_CONFIG.baseUrl).trim().replace(/\/+$/, "");
-  return normalized.endsWith("/chat/completions") ? normalized : `${normalized}/chat/completions`;
+  if (normalized.endsWith("/chat/completions")) {
+    return normalized.replace(/\/chat\/completions$/, "/responses");
+  }
+  return normalized.endsWith("/responses") ? normalized : `${normalized}/responses`;
 }
 
 function assertBackofficePasscode(passcode: string) {

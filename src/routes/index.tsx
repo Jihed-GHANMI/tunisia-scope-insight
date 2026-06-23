@@ -78,29 +78,36 @@ function App() {
 
   return (
     <div className="min-h-screen text-foreground">
-      <header className="sticky top-0 z-30 border-b border-white/10 backdrop-blur-xl bg-background/60">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3.5">
+      <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/95 text-slate-950 shadow-[0_14px_45px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <motion.div
-            initial={{ opacity: 0, x: -10 }}
+            initial={false}
             animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-3"
+            className="flex min-w-0 items-center gap-3"
           >
-            <img
-              src={logo}
-              alt="EvalitX AI"
-              className="h-10 w-auto drop-shadow-[0_0_18px_rgba(139,92,246,0.35)]"
-            />
+            <div className="flex h-12 items-center rounded-xl border border-slate-200 bg-white px-3 shadow-[0_10px_26px_-20px_rgba(79,70,229,0.45)]">
+              <img src={logo} alt="EvalitX AI" className="h-9 w-auto object-contain" />
+            </div>
+            <div className="hidden min-w-0 sm:block">
+              <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-violet-600">
+                <span className="h-1.5 w-1.5 rounded-full bg-gradient-brand shadow-[0_0_14px_rgba(139,92,246,0.65)]" />
+                Digital maturity
+              </div>
+              <div className="truncate text-sm font-semibold text-slate-700">
+                Diagnostic data &amp; IA
+              </div>
+            </div>
           </motion.div>
-          <nav className="hidden items-center gap-2 md:flex">
+          <nav className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-1.5 shadow-inner md:flex">
             {steps.map((s, i) => (
               <div key={s.key} className="flex items-center gap-2">
                 <div
-                  className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  className={`flex h-8 items-center gap-2 rounded-xl px-3 text-xs font-semibold transition ${
                     i === activeIdx
-                      ? "bg-gradient-brand text-white shadow-[0_0_20px_rgba(139,92,246,0.4)]"
+                      ? "bg-gradient-brand text-white shadow-[0_10px_24px_-12px_rgba(139,92,246,0.75)]"
                       : i < activeIdx
-                        ? "bg-white/10 text-white/80"
-                        : "text-white/40"
+                        ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-100"
+                        : "text-slate-500 hover:bg-white hover:text-slate-800"
                   }`}
                 >
                   <span
@@ -108,20 +115,20 @@ function App() {
                       i === activeIdx
                         ? "bg-white/25"
                         : i < activeIdx
-                          ? "bg-white/20"
-                          : "bg-white/10"
+                          ? "bg-violet-100 text-violet-700"
+                          : "bg-slate-200 text-slate-600"
                     }`}
                   >
                     {i + 1}
                   </span>
                   {s.label}
                 </div>
-                {i < steps.length - 1 && <div className="h-px w-6 bg-white/10" />}
+                {i < steps.length - 1 && <div className="h-px w-5 bg-slate-200" />}
               </div>
             ))}
             <Link
               to="/backoffice"
-              className="ml-2 rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-white/55 transition hover:bg-white/10 hover:text-white/85"
+              className="ml-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-violet-200 hover:text-violet-700 hover:shadow-sm"
             >
               Backoffice
             </Link>
